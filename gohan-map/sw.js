@@ -2,7 +2,7 @@
 // - アプリ本体は先に保存しておき、電波がなくても開けるようにする
 // - 地図の画像は見た分だけ保存し、2回目からは保存分を使う（上限あり）
 
-const VERSION = 'v6';
+const VERSION = 'v8';
 const APP_CACHE = `gohanmap-app-${VERSION}`;
 const TILE_CACHE = 'gohanmap-tiles';
 const TILE_MAX = 1500; // 地図画像の保存上限（だいたい 30〜50MB）
@@ -17,6 +17,9 @@ const APP_FILES = [
   './icons/apple-touch-icon.png',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css',
   'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js',
+  'https://unpkg.com/maplibre-gl@5.24.1/dist/maplibre-gl.css',
+  'https://unpkg.com/maplibre-gl@5.24.1/dist/maplibre-gl.js',
+  'https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.1.4/leaflet-maplibre-gl.js',
 ];
 
 self.addEventListener('install', e => {
@@ -38,7 +41,13 @@ self.addEventListener('fetch', e => {
   const url = new URL(req.url);
 
   // 地図の画像：保存分があればそれ、なければ取りに行って保存
-  if (url.hostname === 'cyberjapandata.gsi.go.jp') {
+  // OpenFreeMap のスタイルと目次（TileJSON）は更新されるので、最新を先に取りに行く
+  if (url.hostname === 'tiles.openfreemap.org' && (url.pathname.startsWith('/styles/') || url.pathname === '/planet')) {
+    e.respondWith(fetch(req).then(res => { if (res.ok) caches.open(TILE_CACHE).then(c => c.put(req, res.clone())); return res; })
+      .catch(() => caches.match(req)));
+    return;
+  }
+  if (url.hostname === 'cyberjapandata.gsi.go.jp' || url.hostname === 'tiles.openfreemap.org') {
     e.respondWith(tileFirst(req));
     return;
   }

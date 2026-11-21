@@ -17,6 +17,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@600;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.1/dist/maplibre-gl.css">
 <style>
 /* =========================================================
    見た目の決まり（A案 大人ナチュラル／ごはん日記）
@@ -110,8 +111,9 @@ button{cursor:pointer;border:none;background:none}
 
 /* ---------- 地図 ---------- */
 #map{position:absolute;inset:0;background:var(--bg)}
-.tiles-pale{filter:sepia(.18) saturate(.6) brightness(1.03)}
-.tiles-std{filter:sepia(.12) saturate(.55) brightness(1.04)}
+/* 地図は色を加工しない（道と地名を読みやすく） */
+.tiles-pale{}
+.tiles-std{}
 .leaflet-container{font-family:inherit;background:var(--bg)}
 .leaflet-control-attribution{font-size:9px;background:rgba(255,253,252,.85)!important;color:var(--sub)}
 .leaflet-control-attribution a{color:var(--sub)}
@@ -123,10 +125,14 @@ button{cursor:pointer;border:none;background:none}
 .map-top .knob,.map-side .knob{box-shadow:var(--shadow);border:none;width:42px;height:42px}
 .map-side{position:absolute;right:16px;bottom:20px;z-index:500;display:grid;gap:12px}
 /* ピン：角丸の写真マス。写真がない店はくすみ色に漢字。行きたいは点線 */
-.pin{width:42px;height:42px;border-radius:12px;background:var(--tone,#d9c9c5) center/cover no-repeat;border:3px solid var(--card);box-shadow:0 4px 12px rgba(80,55,50,.28);display:grid;place-items:center;color:#fff;font-family:var(--serif);font-weight:800;font-size:16px;position:relative;transition:transform .15s}
+.pin{width:46px;height:46px;border-radius:12px;background:var(--tone,#d9c9c5) center/cover no-repeat;border:3px solid var(--card);box-shadow:0 4px 12px rgba(80,55,50,.28);display:grid;place-items:center;color:#fff;font-family:var(--serif);font-weight:800;font-size:16px;position:relative;transition:transform .15s}
 .pin.wish{background:var(--card);border:2px dashed #b9aba7;color:var(--sub)}
 .pin .ht{position:absolute;right:-7px;top:-7px;width:18px;height:18px;border-radius:50%;background:var(--card);display:grid;place-items:center;box-shadow:0 1px 4px rgba(0,0,0,.18)}
-.pin.active{transform:scale(1.25);z-index:1}
+.pin.active{transform:scale(1.2);z-index:1}
+/* ピンの下の店名（白いふちで地図の上でも読める） */
+.pin-name{position:absolute;left:50%;top:calc(100% + 4px);transform:translateX(-50%);white-space:nowrap;font-family:"Zen Kaku Gothic New",sans-serif;font-size:11px;font-weight:700;color:var(--ink);background:rgba(255,253,252,.92);border-radius:6px;padding:1px 6px;box-shadow:0 1px 3px rgba(80,55,50,.2);pointer-events:none}
+#map.far .pin-name{display:none}
+.leaflet-gl-layer{z-index:200}
 .me{width:84px;height:84px;border-radius:50%;background:rgba(75,64,62,.10);display:grid;place-items:center}
 .me i{width:16px;height:16px;border-radius:50%;background:var(--ink);border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.3)}
 .pick-cross{position:absolute;left:50%;top:50%;z-index:600;pointer-events:none;transform:translate(-50%,-50%)}
@@ -368,9 +374,11 @@ a.btn{text-decoration:none}
 <div class="toast" id="toast" role="status"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/maplibre-gl@5.24.1/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.1.4/leaflet-maplibre-gl.js"></script>
 <script>
 /* =========================================================
-   ごはんマップ v6（ごはん日記：くすみカラー＋明朝＋PWA）
+   ごはんマップ v8（Googleマップ風のベクター地図：OpenFreeMap liberty）
    - 保存はブラウザの中（localStorage）
    - 地図は Leaflet ＋ 国土地理院の地理院タイル
    ========================================================= */
@@ -549,18 +557,42 @@ function closePeek(){
 const HOME_LL = [33.5612, 133.5400]; // 最初に出す位置（高知市中心部）
 const GSI_ATTR = '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">国土地理院</a>';
 const TILE = {
-  pale:{url:'https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', cls:'tiles-pale', name:'淡色地図'},
-  std: {url:'https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png',  cls:'tiles-std',  name:'標準地図'},
+  vec: {name:'ふつうの地図', style:'https://tiles.openfreemap.org/styles/liberty'},
+  std: {name:'国土地理院の地図', url:'https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png'},
 };
-let map = null, tiles, markers = {}, meMarker = null, activeId = null, mapFilter = 'all', tileKind = 'pale';
-const makeTiles = kind => L.tileLayer(TILE[kind].url, {maxNativeZoom:18, maxZoom:19, attribution:GSI_ATTR, className:TILE[kind].cls});
+let map = null, tiles, markers = {}, meMarker = null, activeId = null, mapFilter = 'all', tileKind = 'vec';
+// 地名を日本語だけにする（liberty は「英字＋日本語」の2行で出すため）
+function japaneseLabels(gl){
+  const fix = () => {
+    (gl.getStyle()?.layers || []).forEach(l => {
+      if(l.type !== 'symbol') return;
+      const tf = gl.getLayoutProperty(l.id, 'text-field');
+      if(tf && JSON.stringify(tf).includes('name')) gl.setLayoutProperty(l.id, 'text-field', ['coalesce', ['get','name:ja'], ['get','name']]);
+    });
+  };
+  if(gl.isStyleLoaded()) fix(); else gl.once('style.load', fix);
+}
+// 地図の土台を作る（ベクター地図が使えないときは国土地理院に切り替える）
+function makeTiles(kind){
+  if(kind==='vec' && L.maplibreGL && window.maplibregl && maplibregl.supported?.() !== false){
+    const layer = L.maplibreGL({style: TILE.vec.style, attributionControl:false});
+    layer.on('add', () => { try{ japaneseLabels(layer.getMaplibreMap()); }catch(e){ /* 地名の調整に失敗しても地図は出す */ } });
+    return layer;
+  }
+  return L.tileLayer(TILE.std.url, {maxNativeZoom:18, maxZoom:19, attribution:GSI_ATTR});
+}
+const OSM_ATTR = '&copy; <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>';
 
 function initMap(){
   map = L.map('map', {zoomControl:false, attributionControl:true}).setView(HOME_LL, 16);
   map.attributionControl.setPrefix(false);
   tiles = makeTiles(tileKind).addTo(map);
+  map.attributionControl.addAttribution(OSM_ATTR);
   map.on('contextmenu', e => { if(!picking) openForm({lat:e.latlng.lat, lng:e.latlng.lng}); }); // 長押しで登録
   map.on('click', () => closePeek());
+  // ズーム15より引いたら店名を隠す（重なり防止）
+  const nameToggle = () => document.getElementById('map').classList.toggle('far', map.getZoom() < 15);
+  map.on('zoomend', nameToggle); nameToggle();
   drawPins();
 }
 function pinIcon(s){
@@ -568,7 +600,9 @@ function pinIcon(s){
   const html = s.status==='wish'
     ? `<div class="pin wish ${s.id===activeId?'active':''}">${G[s.genre]?.k||'他'}</div>`
     : `<div class="pin ${s.id===activeId?'active':''}" style="${ph ? `background-image:url('${ph}')` : `--tone:${toneOf(s.genre)}`}">${ph ? '' : (G[s.genre]?.k||'他')}${s.again?`<span class="ht">${HEART.replace('class="heart"','width="11" height="11"')}</span>`:''}</div>`;
-  return L.divIcon({className:'', html, iconSize:[42,42], iconAnchor:[21,21]});
+  // 店名ラベルを足す（地図を引いたときは CSS で隠す）
+  const named = html.replace(/<\/div>$/, `<span class="pin-name">${esc(s.name)}</span></div>`);
+  return L.divIcon({className:'', html:named, iconSize:[46,46], iconAnchor:[23,23]});
 }
 function drawPins(){
   if(!map) return;
@@ -597,8 +631,11 @@ document.querySelectorAll('[data-mf]').forEach(b => b.addEventListener('click', 
   closePeek(); drawPins();
 }));
 $('#btnTiles').addEventListener('click', () => {
-  tileKind = tileKind==='pale' ? 'std' : 'pale';
-  tiles.remove(); tiles = makeTiles(tileKind).addTo(map); toast(TILE[tileKind].name + 'に切り替えた');
+  tileKind = tileKind==='vec' ? 'std' : 'vec';
+  tiles.remove(); tiles = makeTiles(tileKind).addTo(map);
+  // 出典を地図の種類に合わせる
+  map.attributionControl.removeAttribution(OSM_ATTR); if(tileKind==='vec') map.attributionControl.addAttribution(OSM_ATTR);
+  toast(TILE[tileKind].name + 'に切り替えた');
 });
 function getHere(){
   return new Promise((ok, ng) => {
@@ -755,7 +792,7 @@ function openDetail(id){
     if(!window.L) return;
     miniMap = L.map('miniMap', {zoomControl:false, dragging:false, scrollWheelZoom:false, doubleClickZoom:false, touchZoom:false, attributionControl:true}).setView([s.lat,s.lng], 17);
     miniMap.attributionControl.setPrefix(false);
-    makeTiles(tileKind).addTo(miniMap);
+    makeTiles(tileKind).addTo(miniMap); if(tileKind==='vec') miniMap.attributionControl.addAttribution(OSM_ATTR);
     L.marker([s.lat,s.lng], {icon:pinIcon(s), interactive:false}).addTo(miniMap); // 写真を探すので店のidはそのまま渡す
   }, 320);
 }
