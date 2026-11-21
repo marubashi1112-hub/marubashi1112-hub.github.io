@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f4efee">
+<title>ごはんマップ</title>
+<!-- PWA（ホーム画面に追加して使う） -->
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icons/icon-192.png">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="ごはんマップ">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@600;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+/* =========================================================
+   見た目の決まり（A案 大人ナチュラル／ごはん日記）
+   雰囲気：ミニマル。余白を広く、線は細く
+   色：くすみカラー。グレージュの地＋くすみピンク＋セージ
+   文字：見出し・数字は明朝、本文はゴシック
+   ========================================================= */
+:root{
+  --bg:#f4efee;          /* 地（ピンクがかったグレージュ） */
+  --card:#fffdfc;        /* カード */
+  --cell:#faf7f6;        /* カレンダーの空きマス */
+  --tint:#efe4e1;        /* 淡いピンクの面 */
+  --ink:#4b403e;         /* 文字（茶みのグレー） */
+  --ink-d:#3f3533;       /* 見出し */
+  --sub:#76645f;         /* 補足（地の上で 4.9:1） */
+  --mute:#958480;        /* 弱い文字（地の上で 3.1:1） */
+  --line:#e4d9d6;        /* 細い線 */
+  --rose:#d39a9a;        /* くすみピンク（また行きたい・星） */
+  --sage:#a7b5a0;        /* セージ */
+  --shadow:0 6px 18px rgba(120,90,85,.10);
+  --serif:"Shippori Mincho B1","Hiragino Mincho ProN","Noto Serif JP",serif;
+  --safe-t:env(safe-area-inset-top,0px);
+  --safe-b:env(safe-area-inset-bottom,0px);
+  --tab-h:68px;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{font-family:"Zen Kaku Gothic New",-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif;color:var(--ink);background:var(--bg);font-size:15px;line-height:1.7;overflow:hidden;overscroll-behavior:none}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;border:none;background:none}
+:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
+.hidden{display:none!important}
+.serif{font-family:var(--serif)}
+
+/* ---------- 画面の入れ物 ---------- */
+.view{position:fixed;inset:0;bottom:calc(var(--tab-h) + var(--safe-b));overflow:hidden;background:var(--bg)}
+.scroll{height:100%;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:calc(var(--safe-t) + 20px) 20px 40px}
+
+/* ---------- 線の丸ボタン ---------- */
+.knob{width:38px;height:38px;border-radius:50%;border:1px solid #dccfcc;background:var(--card);display:grid;place-items:center;flex:none;color:var(--sub)}
+.knob:active{background:var(--tint)}
+
+/* ---------- 料理のマス（写真 or くすみ色＋漢字） ---------- */
+.dish{border-radius:12px;background:var(--tone,#d9c9c5) center/cover no-repeat;flex:none;position:relative;display:grid;place-items:center;color:#fff;font-family:var(--serif);font-weight:800;overflow:hidden}
+.dish.wish{background:var(--card);border:1.5px dashed #cdbdb9;color:var(--sub)}
+
+/* ---------- ホーム：ごはん日記 ---------- */
+.kick{font-size:11px;letter-spacing:.22em;color:var(--sub)}
+.home-top{display:flex;justify-content:space-between;align-items:flex-start}
+.month{font-family:var(--serif);font-weight:800;font-size:48px;line-height:1.1;color:var(--ink-d)}
+.month i{font-style:normal;font-size:20px;font-weight:600;margin-left:4px}
+.month-nav{display:flex;gap:8px;margin-top:16px}
+.sum{display:flex;margin:16px 0 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.sum div{flex:1;padding:10px 0;text-align:center}
+.sum div+div{border-left:1px solid var(--line)}
+.sum small{display:block;font-size:11px;color:var(--sub)}
+.sum b{font-family:var(--serif);font-size:23px;font-weight:800;color:var(--ink-d);font-variant-numeric:tabular-nums}
+.sum b i{font-style:normal;font-family:"Zen Kaku Gothic New",sans-serif;font-size:11px;font-weight:400;margin-left:2px;color:var(--sub)}
+.wk,.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.wk{margin-top:16px}
+.wk div{text-align:center;font-size:10px;letter-spacing:.1em;color:var(--mute);padding-bottom:4px}
+.wk div:first-child{color:#c99a96}
+.cal > *{aspect-ratio:1/1.12;border-radius:10px;font-size:11px;color:var(--mute);padding:4px 5px;position:relative;background-color:var(--cell);text-align:left;display:block}
+.cal > .e{background:none}
+.cal > .td{outline:1.5px solid var(--ink);outline-offset:-1.5px;color:var(--ink);font-weight:700}
+.cal > .on{background:var(--tint);color:var(--sub)}
+.cal > .on.photo{background-size:cover;background-position:center;color:#fff;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,.45)}
+.cal > .on .dot{position:absolute;left:50%;top:58%;width:12px;height:12px;border-radius:50%;background:var(--tone,var(--rose));transform:translate(-50%,-50%)}
+.cal > .on em{position:absolute;right:3px;bottom:3px;font-style:normal;font-size:9px;font-weight:700;background:var(--card);color:var(--ink);border-radius:999px;padding:0 5px;line-height:15px;text-shadow:none}
+.sec-h{display:flex;justify-content:space-between;align-items:baseline;margin:26px 0 12px}
+.sec-h h2{font-family:var(--serif);font-weight:800;font-size:19px;color:var(--ink-d)}
+.sec-h small{font-size:12px;color:var(--sub)}
+.best{width:100%;background:var(--card);border-radius:18px;padding:10px;display:flex;gap:14px;align-items:center;box-shadow:var(--shadow);text-align:left}
+.best .dish{width:118px;height:118px;font-size:40px}
+.best small{font-size:10px;letter-spacing:.14em;color:#a8625f}
+.best h3{font-family:var(--serif);font-weight:800;font-size:20px;margin:2px 0;color:var(--ink-d)}
+.best p{font-size:12px;color:var(--sub);line-height:1.6}
+
+/* 記録の行 */
+.vrow{display:flex;gap:14px;align-items:center;width:100%;text-align:left;padding:12px 0;border-bottom:1px solid var(--line)}
+.vrow .dish{width:60px;height:60px;font-size:22px}
+.vrow .body{flex:1;min-width:0}
+.vrow h3{font-family:var(--serif);font-weight:800;font-size:16px;color:var(--ink-d);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vrow p{font-size:12px;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.5}
+.vrow .date{font-size:11px;color:var(--sub);text-align:right;flex:none;line-height:1.3}
+.vrow .date b{display:block;font-family:var(--serif);font-size:20px;color:var(--ink-d);font-weight:800}
+.stars{color:var(--rose);letter-spacing:2px;font-size:11px}
+.stars .off{color:#e3d6d3}
+.heart{display:inline-block;width:13px;height:13px;vertical-align:-1px;margin-left:5px}
+.empty{text-align:center;color:var(--sub);padding:28px 12px;font-size:14px}
+
+/* ---------- 地図 ---------- */
+#map{position:absolute;inset:0;background:var(--bg)}
+.tiles-pale{filter:sepia(.18) saturate(.6) brightness(1.03)}
+.tiles-std{filter:sepia(.12) saturate(.55) brightness(1.04)}
+.leaflet-container{font-family:inherit;background:var(--bg)}
+.leaflet-control-attribution{font-size:9px;background:rgba(255,253,252,.85)!important;color:var(--sub)}
+.leaflet-control-attribution a{color:var(--sub)}
+.map-top{position:absolute;left:16px;right:16px;top:calc(var(--safe-t) + 14px);z-index:500;display:flex;gap:10px;align-items:center}
+.seg{display:flex;background:var(--card);border-radius:999px;padding:4px;gap:2px;box-shadow:var(--shadow)}
+.seg button{padding:6px 13px;border-radius:999px;font-size:13px;color:var(--sub);white-space:nowrap}
+.seg button[aria-pressed="true"]{background:var(--ink);color:#fff}
+.map-top .sp{flex:1}
+.map-top .knob,.map-side .knob{box-shadow:var(--shadow);border:none;width:42px;height:42px}
+.map-side{position:absolute;right:16px;bottom:20px;z-index:500;display:grid;gap:12px}
+/* ピン：角丸の写真マス。写真がない店はくすみ色に漢字。行きたいは点線 */
+.pin{width:42px;height:42px;border-radius:12px;background:var(--tone,#d9c9c5) center/cover no-repeat;border:3px solid var(--card);box-shadow:0 4px 12px rgba(80,55,50,.28);display:grid;place-items:center;color:#fff;font-family:var(--serif);font-weight:800;font-size:16px;position:relative;transition:transform .15s}
+.pin.wish{background:var(--card);border:2px dashed #b9aba7;color:var(--sub)}
+.pin .ht{position:absolute;right:-7px;top:-7px;width:18px;height:18px;border-radius:50%;background:var(--card);display:grid;place-items:center;box-shadow:0 1px 4px rgba(0,0,0,.18)}
+.pin.active{transform:scale(1.25);z-index:1}
+.me{width:84px;height:84px;border-radius:50%;background:rgba(75,64,62,.10);display:grid;place-items:center}
+.me i{width:16px;height:16px;border-radius:50%;background:var(--ink);border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.3)}
+.pick-cross{position:absolute;left:50%;top:50%;z-index:600;pointer-events:none;transform:translate(-50%,-50%)}
+.pick-bar{position:absolute;left:16px;right:16px;bottom:20px;z-index:600;background:var(--card);border-radius:20px;padding:16px;display:grid;gap:12px;box-shadow:var(--shadow)}
+.pick-bar p{font-size:13px;color:var(--sub);text-align:center}
+.pick-bar div{display:flex;gap:10px}
+
+/* ---------- 下から出るカード ---------- */
+.peek{position:fixed;left:0;right:0;bottom:0;z-index:950;background:var(--card);border-radius:24px 24px 0 0;box-shadow:0 -6px 30px rgba(120,90,85,.18);padding:20px 20px calc(var(--safe-b) + 20px);transform:translateY(110%);transition:transform .28s cubic-bezier(.2,.8,.2,1)}
+.peek.open{transform:none}
+.peek::before{content:"";position:absolute;left:50%;top:8px;width:36px;height:4px;border-radius:2px;background:var(--line);transform:translateX(-50%)}
+.peek-head{display:flex;gap:14px;align-items:center;margin-top:6px}
+.peek-head .dish{width:84px;height:84px;font-size:30px}
+.peek-head h2{font-family:var(--serif);font-weight:800;font-size:21px;line-height:1.3;color:var(--ink-d)}
+.peek-head .x{margin-left:auto;align-self:flex-start}
+.peek .row-btns{margin-top:16px}
+.peek-list{max-height:46vh;overflow-y:auto;margin-top:6px}
+.meta{font-size:12px;color:var(--sub)}
+
+/* ---------- ボタン ---------- */
+.btn{flex:1;min-height:48px;border-radius:999px;font-weight:500;font-size:14px;display:flex;align-items:center;justify-content:center;gap:6px;padding:0 18px;background:var(--card);border:1px solid #dccfcc;color:var(--ink)}
+a.btn{text-decoration:none}
+.btn.dark{background:var(--ink);border-color:var(--ink);color:#fff}
+.row-btns{display:flex;gap:10px}
+
+/* ---------- お店（一覧） ---------- */
+.page-h{margin:4px 0 16px}
+.page-h h1{font-family:var(--serif);font-weight:800;font-size:30px;color:var(--ink-d)}
+.search{width:100%;height:46px;border:1px solid var(--line);border-radius:999px;padding:0 18px;background:var(--card)}
+.search:focus{outline:none;border-color:var(--ink)}
+.chips{display:flex;gap:6px;overflow-x:auto;padding:12px 20px 2px;margin:0 -20px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;padding:5px 13px;border-radius:999px;border:1px solid var(--line);background:var(--card);font-size:12px;color:var(--sub);white-space:nowrap}
+.chip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:#fff}
+.sort-row{display:flex;justify-content:space-between;align-items:center;margin:12px 0 2px;font-size:12px;color:var(--sub)}
+.sort-row select{border:none;background:none;font-size:12px;color:var(--ink)}
+
+/* ---------- きろく（ふりかえり） ---------- */
+.stat3{display:flex;border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-bottom:22px}
+.stat3 div{flex:1;padding:12px 0;text-align:center}
+.stat3 div+div{border-left:1px solid var(--line)}
+.stat3 small{display:block;font-size:11px;color:var(--sub)}
+.stat3 b{font-family:var(--serif);font-weight:800;font-size:26px;color:var(--ink-d)}
+.stat3 b i{font-style:normal;font-family:"Zen Kaku Gothic New",sans-serif;font-size:11px;font-weight:400;color:var(--sub);margin-left:2px}
+.panel{background:var(--card);border-radius:18px;box-shadow:var(--shadow);padding:18px;margin-bottom:14px}
+.panel h3{font-family:var(--serif);font-weight:800;font-size:16px;margin-bottom:12px;color:var(--ink-d)}
+.bars{display:flex;align-items:flex-end;gap:10px;height:120px}
+.bars .col{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;gap:5px}
+.bars .bar{width:100%;max-width:24px;background:var(--tint);border-radius:6px 6px 2px 2px;min-height:4px}
+.bars .col.now .bar{background:var(--rose)}
+.bars small{font-size:10px;color:var(--sub)}
+.bars em{font-style:normal;font-family:var(--serif);font-size:13px;font-weight:800}
+.gen{display:grid;grid-template-columns:24px minmax(0,1fr) 20px;gap:10px;align-items:center;margin-bottom:10px;font-size:12px}
+.gen b{font-family:var(--serif);font-weight:800;text-align:center}
+.gen .track{height:6px;background:var(--tint);border-radius:3px;overflow:hidden}
+.gen .fill{height:100%;background:var(--tone,var(--rose));border-radius:3px}
+.rank{list-style:none}
+.rank li{display:flex;gap:12px;align-items:center;padding:7px 0}
+.rank .dish{width:38px;height:38px;font-size:15px;border-radius:9px}
+.rank .nm{flex:1;min-width:0;font-family:var(--serif);font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.money{font-family:var(--serif);font-weight:800;font-size:30px;color:var(--ink-d)}
+.money i{font-style:normal;font-size:13px;color:var(--sub);margin-left:3px}
+
+/* ---------- 下のタブ（真ん中に＋） ---------- */
+.dock{position:fixed;left:0;right:0;bottom:0;z-index:900;height:calc(var(--tab-h) + var(--safe-b));padding-bottom:var(--safe-b);background:var(--card);border-top:1px solid #ece3e1;display:grid;grid-template-columns:repeat(5,1fr);align-items:start;transition:transform .25s}
+.dock.hide{transform:translateY(110%)}
+.dock > button{display:flex;flex-direction:column;align-items:center;gap:2px;padding-top:10px;font-size:10px;color:var(--mute)}
+.dock > button[aria-current="page"]{color:var(--ink)}
+.fab{width:54px;height:54px;border-radius:50%;background:var(--ink);color:#fff;display:grid;place-items:center;margin:-20px auto 0;box-shadow:0 6px 14px rgba(75,64,62,.3)}
+.fab:active{transform:scale(.96)}
+
+/* ---------- 全画面で重ねる画面（詳細・登録） ---------- */
+.sheet{position:fixed;inset:0;z-index:1000;background:var(--bg);display:flex;flex-direction:column;transform:translateY(100%);transition:transform .3s cubic-bezier(.2,.8,.2,1);visibility:hidden}
+.sheet.open{transform:none;visibility:visible}
+.sheet-head{display:flex;align-items:center;gap:8px;padding:calc(var(--safe-t) + 10px) 16px 8px}
+.sheet-head h2{flex:1;font-size:14px;font-weight:500;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.text-btn{height:40px;padding:0 14px;border-radius:999px;flex:none;font-size:14px}
+.text-btn.save{background:var(--ink);color:#fff;padding:0 18px}
+.sheet-body{flex:1;overflow-y:auto;padding:6px 20px calc(var(--safe-b) + 40px)}
+
+/* 詳細 */
+.hero .dish{width:100%;height:auto;aspect-ratio:4/3;border-radius:20px;font-size:80px}
+.hero .dish.wish{aspect-ratio:4/2}
+.hero-body{padding:16px 2px 0}
+.hero h1{font-family:var(--serif);font-weight:800;font-size:26px;line-height:1.3;color:var(--ink-d)}
+.hero .stars{font-size:13px}
+.facts{display:flex;border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-top:14px}
+.facts div{flex:1;padding:9px 0;text-align:center}
+.facts div+div{border-left:1px solid var(--line)}
+.facts small{display:block;font-size:10px;color:var(--sub)}
+.facts b{font-family:var(--serif);font-size:16px;font-weight:800}
+.tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+.tag{font-size:11px;color:var(--sub);border:1px solid var(--line);background:var(--card);border-radius:999px;padding:2px 10px}
+.mini-map{height:140px;border-radius:16px;overflow:hidden;margin:18px 0 12px}
+.visit{padding:14px 0;border-bottom:1px solid var(--line)}
+.visit-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.visit-top b{font-family:var(--serif);font-weight:800;font-size:16px;color:var(--ink-d)}
+.visit p{font-size:14px;margin-top:4px;overflow-wrap:anywhere}
+.visit .menu{font-weight:500}
+.photos{display:flex;gap:8px;margin-top:10px;overflow-x:auto}
+.photos img{width:84px;height:84px;object-fit:cover;border-radius:10px;flex:none}
+.danger{color:#b0554f;font-size:13px;margin-top:22px;padding:8px 0}
+
+/* 登録フォーム */
+.photo-pick{margin:4px 0 22px}
+.photo-pick label{width:100%;aspect-ratio:4/3;border-radius:20px;background:var(--card);border:1.5px dashed #cdbdb9;display:grid;place-items:center;cursor:pointer;overflow:hidden;color:var(--sub);font-size:13px;text-align:center;line-height:1.6}
+.photo-pick label.has{border:none}
+.photo-pick img{width:100%;height:100%;object-fit:cover}
+.photo-pick .more{display:flex;gap:6px;margin-top:8px}
+.photo-pick .more img{width:52px;height:52px;border-radius:10px}
+.how{display:grid;gap:10px;margin-bottom:10px}
+.how button{display:flex;gap:14px;align-items:center;text-align:left;background:var(--card);border-radius:16px;border:1px solid var(--line);padding:14px}
+.how button:active{border-color:var(--ink)}
+.how b{display:block;font-size:15px;font-weight:500}
+.how small{color:var(--sub);font-size:11px}
+.how .ic{width:40px;height:40px;border-radius:12px;background:var(--tint);color:var(--ink);display:grid;place-items:center;flex:none}
+.place-ok{display:flex;gap:10px;align-items:center;background:var(--tint);border-radius:14px;padding:10px 14px;margin-bottom:20px;font-size:13px}
+.place-ok span{flex:1;min-width:0;overflow-wrap:anywhere}
+.field{margin-bottom:20px}
+.field > label,.field > .lbl{display:block;font-size:12px;color:var(--sub);margin-bottom:6px;letter-spacing:.04em}
+.field input[type=text],.field input[type=date],.field input[type=number],.field input[type=url],.field textarea{width:100%;min-height:48px;border:1px solid var(--line);border-radius:14px;padding:11px 14px;background:var(--card)}
+.field input:focus,.field textarea:focus{outline:none;border-color:var(--ink)}
+.field textarea{min-height:90px;resize:vertical}
+.choice{display:flex;flex-wrap:wrap;gap:6px}
+.choice button{padding:7px 13px;border-radius:999px;border:1px solid var(--line);background:var(--card);font-size:13px;display:flex;gap:6px;align-items:center;color:var(--sub)}
+.choice button[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:#fff}
+.choice .k{font-family:var(--serif);font-weight:800}
+.star-input{display:flex;gap:4px}
+.star-input button{font-size:30px;line-height:1;color:#e3d6d3;width:44px;height:44px}
+.star-input button.on{color:var(--rose)}
+.toggle{display:flex!important;align-items:center;gap:10px;font-size:14px!important;color:var(--ink)!important}
+.toggle input{width:20px;height:20px;accent-color:var(--rose)}
+.divider{height:1px;background:var(--line);margin:6px 0 22px}
+.note{font-size:11px;color:var(--sub);margin-top:6px;line-height:1.6}
+
+/* お知らせ */
+.toast{position:fixed;left:50%;top:calc(var(--safe-t) + 14px);transform:translate(-50%,-12px);background:var(--ink);color:#fff;padding:9px 18px;border-radius:999px;font-size:13px;opacity:0;transition:.2s;z-index:2000;pointer-events:none;max-width:calc(100% - 40px);text-align:center}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<!-- ===== ホーム（カレンダー） ===== -->
+<section class="view" id="view-home" aria-label="カレンダー">
+  <div class="scroll" id="home"></div>
+</section>
+
+<!-- ===== 地図 ===== -->
+<section class="view hidden" id="view-map" aria-label="地図">
+  <div id="map"></div>
+  <div class="map-top">
+    <div class="seg" role="group" aria-label="表示する店">
+      <button data-mf="all" aria-pressed="true">すべて</button>
+      <button data-mf="visited" aria-pressed="false">行った</button>
+      <button data-mf="wish" aria-pressed="false">行きたい</button>
+    </div>
+    <span class="sp"></span>
+    <button class="knob" id="btnTiles" aria-label="地図の種類を切り替える">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/></svg>
+    </button>
+  </div>
+  <div class="map-side">
+    <button class="knob" id="btnLocate" aria-label="現在地に移動">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.8" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+    </button>
+  </div>
+  <div class="pick-cross hidden" id="pickCross" aria-hidden="true">
+    <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#24242c" stroke-width="1.6" stroke-linecap="round"><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1" fill="#24242c"/><path d="M12 1v5M12 18v5M1 12h5M18 12h5"/></svg>
+  </div>
+  <div class="pick-bar hidden" id="pickBar">
+    <p>地図を動かして、十字を店の位置に合わせてね</p>
+    <div><button class="btn" id="pickCancel">やめる</button><button class="btn dark" id="pickOk">ここにする</button></div>
+  </div>
+</section>
+
+<!-- ===== 一覧 ===== -->
+<section class="view hidden" id="view-list" aria-label="一覧">
+  <div class="scroll">
+    <div class="page-h"><p class="kick">SHOPS</p><h1>お店</h1></div>
+    <input class="search" id="q" type="search" placeholder="店名・食べたもの・メモで探す" aria-label="検索">
+    <div class="chips" role="group" aria-label="状態">
+      <button class="chip" data-ls="all" aria-pressed="true">すべて</button>
+      <button class="chip" data-ls="visited" aria-pressed="false">行った</button>
+      <button class="chip" data-ls="wish" aria-pressed="false">行きたい</button>
+      <button class="chip" data-ls="again" aria-pressed="false">また行きたい</button>
+    </div>
+    <div class="chips" id="listGenre" role="group" aria-label="ジャンル"></div>
+    <div class="sort-row"><span id="listCount"></span>
+      <select id="sort" aria-label="並び順">
+        <option value="recent">最近行った順</option>
+        <option value="rating">評価が高い順</option>
+        <option value="count">よく行く順</option>
+        <option value="name">名前順</option>
+      </select>
+    </div>
+    <div id="list"></div>
+  </div>
+</section>
+
+<!-- ===== ふりかえり ===== -->
+<section class="view hidden" id="view-stats" aria-label="ふりかえり">
+  <div class="scroll" id="stats"></div>
+</section>
+
+<!-- ===== 下の浮いたメニュー ===== -->
+<nav class="dock" id="dock" aria-label="メニュー">
+  <button data-tab="home" aria-current="page"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="4" y="5" width="16" height="15" rx="3"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>日記</button>
+  <button data-tab="map"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-12a7 7 0 0 1 14 0c0 5.8-7 12-7 12Z"/><circle cx="12" cy="9" r="2.5"/></svg>マップ</button>
+  <div><button class="fab" id="btnAdd" aria-label="記録する"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button></div>
+  <button data-tab="list"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>お店</button>
+  <button data-tab="stats"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>きろく</button>
+</nav>
+
+<!-- ===== 下から出るカード ===== -->
+<div class="peek" id="peek" aria-live="polite"></div>
+
+<!-- ===== 店の詳細 ===== -->
+<div class="sheet" id="detail" role="dialog" aria-modal="true" aria-labelledby="detailTitle">
+  <div class="sheet-head">
+    <button class="knob" data-close="detail" aria-label="戻る"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg></button>
+    <h2 id="detailTitle"></h2>
+    <button class="text-btn" id="btnEditShop">編集</button>
+  </div>
+  <div class="sheet-body" id="detailBody"></div>
+</div>
+
+<!-- ===== 登録・編集 ===== -->
+<div class="sheet" id="form" role="dialog" aria-modal="true" aria-labelledby="formTitle">
+  <div class="sheet-head">
+    <button class="text-btn" data-close="form">やめる</button>
+    <h2 id="formTitle">記録する</h2>
+    <button class="text-btn save" id="btnSave">保存する</button>
+  </div>
+  <div class="sheet-body" id="formBody"></div>
+</div>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+/* =========================================================
+   ごはんマップ v6（ごはん日記：くすみカラー＋明朝＋PWA）
+   - 保存はブラウザの中（localStorage）
+   - 地図は Leaflet ＋ 国土地理院の地理院タイル
+   ========================================================= */
+
+// ---------- ジャンル ----------
+const GENRES = [
+  {id:'men',   name:'麺類',             k:'麺', c:['#f6d08f','#c9772f','#6e3613']},
+  {id:'sushi', name:'寿司・海鮮',       k:'鮨', c:['#ffd9cf','#ec7f6d','#8f2f2a']},
+  {id:'wa',    name:'和食',             k:'和', c:['#efe6c9','#b69a5a','#5d4a1e']},
+  {id:'yo',    name:'洋食',             k:'洋', c:['#ffe1a8','#e0913a','#7c3d12']},
+  {id:'chu',   name:'中華',             k:'中', c:['#ffc9a6','#d9582b','#7a1f10']},
+  {id:'curry', name:'カレー・エスニック', k:'香', c:['#ffe58f','#e6a21c','#8a5206']},
+  {id:'sake',  name:'居酒屋・焼鳥',     k:'酒', c:['#f3c9a0','#a95a2a','#4f2410']},
+  {id:'cafe',  name:'カフェ・甘味',     k:'茶', c:['#f4ead9','#c9a27a','#6e4f33']},
+  {id:'etc',   name:'そのほか',         k:'他', c:['#e5ecd8','#94b07a','#3f5a2e']},
+];
+const G = Object.fromEntries(GENRES.map(g => [g.id, g]));
+const COMPANIONS = ['ひとり','家族','友だち','仕事','デート'];
+
+// ---------- ジャンルごとのくすみ色（写真がないときのマスの色） ----------
+const TONE = {men:'#b48c7c', sushi:'#b38282', wa:'#9e8f77', yo:'#aa8967', chu:'#a77873', curry:'#a58b5c', sake:'#8f8399', cafe:'#859080', etc:'#87969c'}; // 白い漢字が 3:1 以上
+const toneOf = genre => TONE[genre] || TONE.etc;
+// 写真：記録の1枚目／店でいちばん新しい写真
+const photoV = v => (v.photos && v.photos[0]) || '';
+const photoS = s => { const v = visitsOf(s.id).find(x => x.photos && x.photos[0]); return v ? v.photos[0] : ''; };
+// 料理のマス（写真があれば写真、なければくすみ色にジャンルの漢字）
+function tile(photo, genre, cls=''){
+  return photo
+    ? `<span class="dish ${cls}" style="background-image:url('${photo}')"></span>`
+    : `<span class="dish ${cls}" style="--tone:${toneOf(genre)}">${G[genre]?.k || '他'}</span>`;
+}
+const dishV = (v, cls='') => tile(photoV(v), shopOf(v.shopId)?.genre, cls);
+const dishS = (s, cls='') => tile(photoS(s), s.genre, cls);
+function wishDish(s, cls=''){ return `<span class="dish wish ${cls}">${G[s.genre]?.k || '他'}</span>`; }
+const HEART = `<svg class="heart" viewBox="0 0 24 24" fill="#d39a9a"><path d="M12 21s-7-4.6-9.2-9.1C1.3 8.6 3.4 5 6.9 5c2 0 3.4 1.1 5.1 3 1.7-1.9 3.1-3 5.1-3 3.5 0 5.6 3.6 4.1 6.9C19 16.4 12 21 12 21Z"/></svg>`;
+
+// ---------- サンプルデータ（架空の店） ----------
+function sampleData(){
+  const s = (id,name,genre,lat,lng,status,tags=[],again=false,address='高知市') =>
+    ({id,name,genre,lat,lng,status,tags,again,address,gmapUrl:''});
+  const shops = [
+    s('s1','麺処 はりま','men',33.5609,133.5431,'visited',['昼','カウンター'],true,'高知市はりまや町'),
+    s('s2','鮨 しおかぜ','sushi',33.5598,133.5398,'visited',['記念日'],true,'高知市帯屋町'),
+    s('s3','喫茶 ゆずの木','cafe',33.5622,133.5372,'visited',['作業できる'],false,'高知市本町'),
+    s('s4','中華 紅楼','chu',33.5655,133.5445,'visited',['大人数OK'],false,'高知市北本町'),
+    s('s5','カレー ひなた','curry',33.5583,133.5352,'visited',['辛め'],true,'高知市上町'),
+    s('s6','焼鳥 とさ灯','sake',33.5617,133.5412,'visited',['夜','予約推奨'],false,'高知市帯屋町'),
+    s('s7','洋食 あかね','yo',33.5640,133.5320,'wish',['オムライス'],false,'高知市升形'),
+    s('s8','炙り小屋 かつを','wa',33.5575,133.5460,'wish',['藁焼き'],false,'高知市菜園場町'),
+  ];
+  const v = (shopId,date,withWho,menu,price,rating,memo='') =>
+    ({id:uid(),shopId,date,with:withWho,menu,price,rating,memo,photos:[]});
+  const visits = [
+    v('s1','2026-11-18','仕事','塩らーめん、半チャーハン',1050,4,'昼は12時前に入れば待たない'),
+    v('s1','2026-10-30','ひとり','醤油らーめん',800,4),
+    v('s1','2026-09-12','友だち','つけ麺 大盛り',1000,3,'つけ麺はふつう。塩がいちばん'),
+    v('s2','2026-11-03','家族','おまかせ握り',6600,5,'親の誕生日。カウンター6席なので予約必須'),
+    v('s3','2026-11-12','ひとり','ゆずスカッシュ、チーズケーキ',1100,4,'電源あり。午後は混む'),
+    v('s3','2026-11-20','友だち','ブレンド、プリン',1000,4),
+    v('s3','2026-10-08','仕事','ブレンド',500,3),
+    v('s4','2026-11-01','仕事','酢豚定食',980,3,'10人で入れた'),
+    v('s5','2026-11-08','ひとり','チキンカレー 3辛',1200,5,'3辛でもしっかり辛い'),
+    v('s5','2026-09-27','友だち','キーマ',1150,4),
+    v('s6','2026-11-14','仕事','ねぎま、つくね、皮',3500,4,'打ち上げ。2階は座敷'),
+    v('s6','2026-11-20','友だち','手羽先',2400,4),
+  ];
+  return {shops,visits};
+}
+
+// ---------- 保存（使えないときはメモリだけで動かす） ----------
+const KEY = 'gohanmap';
+let db;
+function load(){
+  try{ const raw = localStorage.getItem(KEY); if(raw){ db = JSON.parse(raw); return; } }catch(e){ /* 読めないときはサンプルで始める */ }
+  db = sampleData(); save();
+}
+function save(){
+  try{ localStorage.setItem(KEY, JSON.stringify(db)); return true; }
+  catch(e){ toast('この端末には保存できなかった。写真を減らしてもう一度保存してね'); return false; }
+}
+function uid(){ return Math.random().toString(36).slice(2,10); }
+
+// ---------- 小さな道具 ----------
+const $ = sel => document.querySelector(sel);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const shopOf = id => db.shops.find(s => s.id === id);
+const visitsOf = id => db.visits.filter(v => v.shopId === id).sort((a,b) => b.date.localeCompare(a.date));
+const lastVisit = id => visitsOf(id)[0];
+const avgRating = id => { const vs = visitsOf(id); return vs.length ? vs.reduce((a,v)=>a+v.rating,0)/vs.length : 0; };
+const stars = n => { const r = Math.round(n); return `<span class="stars" aria-label="評価${r}">${'★'.repeat(r)}<span class="off">${'★'.repeat(5-r)}</span></span>`; };
+const md = d => { if(!d) return ''; const p = d.split('-'); return `${+p[1]}/${+p[2]}`; };
+const yen = n => n ? `${Number(n).toLocaleString()}円` : '';
+const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
+function toast(msg){ const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(()=>t.classList.remove('show'), 2400); }
+
+// 記録1件の行（ホーム・日付カードで使う）
+function vrow(v){
+  const s = shopOf(v.shopId); if(!s) return '';
+  const p = v.date.split('-');
+  return `<button class="vrow" onclick="openDetail('${s.id}')">${dishV(v)}
+    <div class="body"><h3>${esc(s.name)}${s.again ? HEART : ''}</h3><p>${esc(v.menu || G[s.genre]?.name)}</p>${stars(v.rating)}</div>
+    <div class="date"><b>${+p[2]}</b>${+p[1]}月</div></button>`;
+}
+
+// =========================================================
+//  ホーム（カレンダー）
+// =========================================================
+let calY = new Date().getFullYear(), calM = new Date().getMonth(); // 0始まりの月
+function renderHome(){
+  const ym = `${calY}-${String(calM+1).padStart(2,'0')}`;
+  const vs = db.visits.filter(v => v.date.startsWith(ym)).sort((a,b) => b.date.localeCompare(a.date));
+  const shops = new Set(vs.map(v => v.shopId));
+  const total = vs.reduce((a,v) => a + (+v.price||0), 0);
+  const byDay = {}; vs.forEach(v => (byDay[+v.date.slice(8)] ||= []).push(v));
+  const first = new Date(calY, calM, 1).getDay(), days = new Date(calY, calM+1, 0).getDate();
+  const t = todayStr();
+  let cells = '';
+  for(let i=0;i<first;i++) cells += '<span class="e"></span>';
+  for(let d=1; d<=days; d++){
+    const ds = `${ym}-${String(d).padStart(2,'0')}`, list = byDay[d];
+    if(list){
+      // 写真のある記録を優先して、マスに敷く
+      const withPh = list.find(v => photoV(v)), v0 = withPh || list[0];
+      const ph = photoV(v0);
+      cells += `<button class="on ${ph?'photo':''} ${ds===t?'td':''}" onclick="openDay('${ds}')" aria-label="${calM+1}月${d}日 ${list.length}件" style="${ph ? `background-image:url('${ph}')` : ''}">${d}${ph ? '' : `<span class="dot" style="--tone:${toneOf(shopOf(v0.shopId)?.genre)}"></span>`}${list.length>1?`<em>${list.length}</em>`:''}</button>`;
+    }else cells += `<span class="${ds===t?'td':''}">${d}</span>`;
+  }
+  const last = new Date(calY, calM+1, 0).getDay();
+  for(let i=last;i<6;i++) cells += '<span class="e"></span>';
+  // 今月のいちばん（評価が高い→写真がある→新しい の順）
+  const best = [...vs].sort((a,b) => b.rating - a.rating || (!!photoV(b) - !!photoV(a)) || b.date.localeCompare(a.date))[0];
+  const bs = best && shopOf(best.shopId);
+  const EN = ['JANUARY','FEBRUARY','MARCH','APRIL','MAY','JUNE','JULY','AUGUST','SEPTEMBER','OCTOBER','NOVEMBER','DECEMBER'][calM];
+  $('#home').innerHTML = `
+    <div class="home-top">
+      <div><p class="kick">GOHAN DIARY ${calY}</p><div class="month">${calM+1}<i>月のごはん</i></div></div>
+      <div class="month-nav">
+        <button class="knob" onclick="moveMonth(-1)" aria-label="前の月"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg></button>
+        <button class="knob" onclick="moveMonth(1)" aria-label="次の月"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg></button>
+      </div>
+    </div>
+    <div class="sum"><div><small>行った回数</small><b>${vs.length}<i>回</i></b></div><div><small>お店</small><b>${shops.size}<i>軒</i></b></div><div><small>ごはん代</small><b>${total.toLocaleString()}<i>円</i></b></div></div>
+    <div class="wk"><div>日</div><div>月</div><div>火</div><div>水</div><div>木</div><div>金</div><div>土</div></div>
+    <div class="cal">${cells}</div>
+    ${bs ? `<div class="sec-h"><h2>今月のいちばん</h2></div>
+      <button class="best" onclick="openDetail('${bs.id}')">${dishV(best)}
+        <div><small>BEST OF ${EN}</small><h3>${esc(bs.name)}</h3><p>${esc([best.menu, best.with].filter(Boolean).join('・'))}${best.memo?`<br>${esc(best.memo)}`:''}</p>${stars(best.rating)}</div></button>` : ''}
+    <div class="sec-h"><h2>この月の記録</h2><small>${vs.length}件</small></div>
+    ${vs.length ? vs.map(vrow).join('') : `<div class="empty">この月はまだ記録がない。<br>下の＋から記録してね</div>`}`;
+}
+function moveMonth(n){ calM += n; if(calM<0){calM=11;calY--;} if(calM>11){calM=0;calY++;} renderHome(); }
+// 日付を押したとき：その日の記録をカードで出す
+function openDay(ds){
+  const vs = db.visits.filter(v => v.date === ds);
+  const p = ds.split('-');
+  const w = ['日','月','火','水','木','金','土'][new Date(+p[0], +p[1]-1, +p[2]).getDay()];
+  openPeek(`<div class="peek-head">${dishV(vs.find(v=>photoV(v))||vs[0])}
+      <div><p class="kick">${p[0]}.${+p[1]}.${+p[2]}</p><h2>${+p[1]}月${+p[2]}日（${w}）</h2><p class="meta">${vs.length}件の記録</p></div>
+      <button class="knob x" onclick="closePeek()" aria-label="閉じる"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    <div class="peek-list">${vs.map(vrow).join('')}</div>`);
+}
+
+// =========================================================
+//  下から出るカード
+// =========================================================
+function openPeek(html){ $('#peek').innerHTML = html; $('#peek').classList.add('open'); $('#dock').classList.add('hide'); }
+function closePeek(){
+  $('#peek').classList.remove('open'); if(!picking) $('#dock').classList.remove('hide');
+  const prev = activeId; activeId = null;
+  const sh = shopOf(prev); if(sh && markers[prev]) markers[prev].setIcon(pinIcon(sh));
+}
+
+// =========================================================
+//  地図
+// =========================================================
+const HOME_LL = [33.5612, 133.5400]; // 最初に出す位置（高知市中心部）
+const GSI_ATTR = '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank" rel="noopener">国土地理院</a>';
+const TILE = {
+  pale:{url:'https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png', cls:'tiles-pale', name:'淡色地図'},
+  std: {url:'https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png',  cls:'tiles-std',  name:'標準地図'},
+};
+let map = null, tiles, markers = {}, meMarker = null, activeId = null, mapFilter = 'all', tileKind = 'pale';
+const makeTiles = kind => L.tileLayer(TILE[kind].url, {maxNativeZoom:18, maxZoom:19, attribution:GSI_ATTR, className:TILE[kind].cls});
+
+function initMap(){
+  map = L.map('map', {zoomControl:false, attributionControl:true}).setView(HOME_LL, 16);
+  map.attributionControl.setPrefix(false);
+  tiles = makeTiles(tileKind).addTo(map);
+  map.on('contextmenu', e => { if(!picking) openForm({lat:e.latlng.lat, lng:e.latlng.lng}); }); // 長押しで登録
+  map.on('click', () => closePeek());
+  drawPins();
+}
+function pinIcon(s){
+  const ph = photoS(s);
+  const html = s.status==='wish'
+    ? `<div class="pin wish ${s.id===activeId?'active':''}">${G[s.genre]?.k||'他'}</div>`
+    : `<div class="pin ${s.id===activeId?'active':''}" style="${ph ? `background-image:url('${ph}')` : `--tone:${toneOf(s.genre)}`}">${ph ? '' : (G[s.genre]?.k||'他')}${s.again?`<span class="ht">${HEART.replace('class="heart"','width="11" height="11"')}</span>`:''}</div>`;
+  return L.divIcon({className:'', html, iconSize:[42,42], iconAnchor:[21,21]});
+}
+function drawPins(){
+  if(!map) return;
+  Object.values(markers).forEach(m => m.remove()); markers = {};
+  db.shops.filter(s => mapFilter==='all' || s.status===mapFilter).forEach(s => {
+    markers[s.id] = L.marker([s.lat,s.lng], {icon:pinIcon(s), keyboard:true, title:s.name})
+      .addTo(map).on('click', ev => { L.DomEvent.stopPropagation(ev); openShopPeek(s.id); });
+  });
+}
+function openShopPeek(id){
+  const s = shopOf(id); if(!s) return;
+  const prev = activeId; activeId = id;
+  [prev,id].forEach(k => { const sh = shopOf(k); if(sh && markers[k]) markers[k].setIcon(pinIcon(sh)); });
+  const lv = lastVisit(id), n = visitsOf(id).length;
+  openPeek(`<div class="peek-head">${s.status==='wish' ? wishDish(s) : dishS(s)}
+      <div style="min-width:0"><p class="kick">${esc(G[s.genre]?.name)}</p><h2>${esc(s.name)}${s.again?HEART:''}</h2>
+      <p class="meta">${s.status==='wish' ? 'まだ行ってない' : `${n}回・最後は${md(lv?.date)}`}</p>${lv ? stars(avgRating(id)) : ''}</div>
+      <button class="knob x" onclick="closePeek()" aria-label="閉じる"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+    ${lv ? `<p class="meta" style="margin-top:10px">前回：${esc(lv.menu||'')}</p>` : ''}
+    <div class="row-btns"><button class="btn" onclick="openDetail('${s.id}')">くわしく見る</button>
+      <button class="btn dark" onclick="openVisitForm('${s.id}')">${s.status==='wish'?'行った！':'また行った'}</button></div>`);
+  map.panTo([s.lat, s.lng]);
+}
+document.querySelectorAll('[data-mf]').forEach(b => b.addEventListener('click', () => {
+  mapFilter = b.dataset.mf; document.querySelectorAll('[data-mf]').forEach(x => x.setAttribute('aria-pressed', x===b));
+  closePeek(); drawPins();
+}));
+$('#btnTiles').addEventListener('click', () => {
+  tileKind = tileKind==='pale' ? 'std' : 'pale';
+  tiles.remove(); tiles = makeTiles(tileKind).addTo(map); toast(TILE[tileKind].name + 'に切り替えた');
+});
+function getHere(){
+  return new Promise((ok, ng) => {
+    if(!navigator.geolocation) return ng(new Error('none'));
+    navigator.geolocation.getCurrentPosition(p => ok({lat:p.coords.latitude, lng:p.coords.longitude}), ng, {enableHighAccuracy:true, timeout:8000});
+  });
+}
+$('#btnLocate').addEventListener('click', async () => {
+  try{
+    const p = await getHere(); if(meMarker) meMarker.remove();
+    meMarker = L.marker([p.lat,p.lng], {icon:L.divIcon({className:'',html:'<div class="me"><i></i></div>',iconSize:[88,88],iconAnchor:[44,44]}), interactive:false}).addTo(map);
+    map.setView([p.lat,p.lng], 17);
+  }catch(e){ toast('現在地が取れなかった。位置情報の許可を確かめてね'); }
+});
+// 地図で場所を選ぶ
+let picking = false, pickResolve = null;
+function pickOnMap(){
+  return new Promise(res => {
+    picking = true; pickResolve = res; switchTab('map'); closePeek();
+    $('#pickCross').classList.remove('hidden'); $('#pickBar').classList.remove('hidden'); $('#dock').classList.add('hide');
+  });
+}
+function endPick(val){
+  picking = false; $('#pickCross').classList.add('hidden'); $('#pickBar').classList.add('hidden'); $('#dock').classList.remove('hide');
+  if(pickResolve){ pickResolve(val); pickResolve = null; }
+}
+$('#pickOk').addEventListener('click', () => { const c = map.getCenter(); endPick({lat:c.lat, lng:c.lng}); });
+$('#pickCancel').addEventListener('click', () => endPick(null));
+
+// =========================================================
+//  一覧
+// =========================================================
+let listStatus = 'all', listGenre = 'all';
+function initList(){
+  $('#listGenre').innerHTML = `<button class="chip" data-lg="all" aria-pressed="true">全ジャンル</button>` +
+    GENRES.map(g => `<button class="chip" data-lg="${g.id}" aria-pressed="false">${esc(g.name)}</button>`).join('');
+  document.querySelectorAll('[data-lg]').forEach(b => b.addEventListener('click', () => {
+    listGenre = b.dataset.lg; document.querySelectorAll('[data-lg]').forEach(x => x.setAttribute('aria-pressed', x===b)); renderList();
+  }));
+  document.querySelectorAll('[data-ls]').forEach(b => b.addEventListener('click', () => {
+    listStatus = b.dataset.ls; document.querySelectorAll('[data-ls]').forEach(x => x.setAttribute('aria-pressed', x===b)); renderList();
+  }));
+  $('#q').addEventListener('input', renderList); $('#sort').addEventListener('change', renderList);
+}
+function renderList(){
+  const q = $('#q').value.trim().toLowerCase();
+  const rows = db.shops.filter(s => {
+    if(listStatus==='visited' && s.status!=='visited') return false;
+    if(listStatus==='wish' && s.status!=='wish') return false;
+    if(listStatus==='again' && !s.again) return false;
+    if(listGenre!=='all' && s.genre!==listGenre) return false;
+    if(!q) return true;
+    return [s.name, s.address, ...(s.tags||[]), ...visitsOf(s.id).flatMap(v => [v.menu, v.memo])].join(' ').toLowerCase().includes(q);
+  });
+  const sort = $('#sort').value;
+  rows.sort((a,b) => sort==='rating' ? avgRating(b.id)-avgRating(a.id)
+    : sort==='count' ? visitsOf(b.id).length-visitsOf(a.id).length
+    : sort==='name' ? a.name.localeCompare(b.name,'ja')
+    : (lastVisit(b.id)?.date||'0').localeCompare(lastVisit(a.id)?.date||'0'));
+  $('#listCount').textContent = `${rows.length}軒`;
+  $('#list').innerHTML = rows.length ? rows.map(s => {
+    const lv = lastVisit(s.id), n = visitsOf(s.id).length;
+    return `<button class="vrow" onclick="openDetail('${s.id}')">${s.status==='wish' ? wishDish(s,'') : dishS(s)}
+      <div class="body"><h3>${esc(s.name)}${s.again?HEART:''}</h3><p>${s.status==='wish' ? '行きたい' : `${n}回・${esc(lv?.menu||'')}`}</p>${s.status==='visited'?stars(avgRating(s.id)):''}</div>
+      ${lv ? `<div class="date"><b>${+lv.date.slice(8)}</b>${+lv.date.slice(5,7)}月</div>` : ''}</button>`;
+  }).join('') : `<div class="empty">条件に合う店がない。検索や絞り込みを変えてみてね</div>`;
+}
+
+// =========================================================
+//  ふりかえり
+// =========================================================
+function renderStats(){
+  const vs = db.visits, visited = db.shops.filter(s => s.status==='visited');
+  const total = vs.reduce((a,v) => a + (+v.price||0), 0);
+  const now = new Date(), months = [];
+  for(let i=5;i>=0;i--){ const d = new Date(now.getFullYear(), now.getMonth()-i, 1); months.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`); }
+  const mc = months.map(m => vs.filter(v => v.date.startsWith(m)).length), mMax = Math.max(1, ...mc);
+  const gc = GENRES.map(g => ({g, n: visited.filter(s => s.genre===g.id).length})).filter(x => x.n).sort((a,b)=>b.n-a.n), gMax = Math.max(1, ...gc.map(x=>x.n));
+  const rank = visited.map(s => ({s, n:visitsOf(s.id).length})).sort((a,b)=>b.n-a.n).slice(0,5);
+  $('#stats').innerHTML = `
+    <div class="page-h"><p class="kick">RECORD</p><h1>きろく</h1></div>
+    <div class="stat3"><div><small>行ったお店</small><b>${visited.length}<i>軒</i></b></div><div><small>行った回数</small><b>${vs.length}<i>回</i></b></div><div><small>行きたい</small><b>${db.shops.length-visited.length}<i>軒</i></b></div></div>
+    <div class="panel"><h3>月ごとの回数</h3><div class="bars">${months.map((m,i) => `<div class="col ${i===5?'now':''}"><em>${mc[i]||''}</em><div class="bar" style="height:${mc[i]/mMax*80}%"></div><small>${+m.slice(5)}月</small></div>`).join('')}</div></div>
+    <div class="panel"><h3>ジャンル</h3>${gc.map(x => `<div class="gen"><b>${x.g.k}</b><div class="track"><div class="fill" style="width:${x.n/gMax*100}%;--tone:${toneOf(x.g.id)}"></div></div><span>${x.n}</span></div>`).join('') || '<p class="meta">まだ記録がない</p>'}</div>
+    <div class="panel"><h3>よく行くお店</h3><ol class="rank">${rank.map(r => `<li>${dishS(r.s)}<span class="nm">${esc(r.s.name)}</span><span class="meta">${r.n}回</span></li>`).join('')}</ol></div>
+    <div class="panel"><h3>使った金額</h3><p class="money">${total.toLocaleString()}<i>円</i></p><p class="meta">1回あたり ${vs.length ? Math.round(total/vs.length).toLocaleString() : 0}円（記録した分）</p></div>
+    ${db.shops.some(isSample) ? `<div class="panel"><h3>サンプルのお店</h3><p class="meta" style="margin-bottom:12px">最初に入っている8軒は見本。自分の記録を始めるときに消してね</p><button class="btn" style="width:100%" onclick="clearSamples()">サンプルを消す</button></div>` : ''}
+    <div class="panel"><h3>データの引っ越し</h3><p class="meta" style="margin-bottom:12px">データはこのスマホの中だけにある。機種変更の前に書き出して、新しいスマホで読み込んでね</p>
+      <div class="row-btns"><button class="btn" onclick="exportData()">書き出す</button><label class="btn">読み込む<input type="file" accept="application/json,.json" hidden onchange="importData(this)"></label></div></div>`;
+}
+const isSample = s => /^s\d$/.test(s.id);
+function clearSamples(){
+  if(clearSamples.armed){
+    const ids = new Set(db.shops.filter(isSample).map(s=>s.id));
+    db.shops = db.shops.filter(s => !ids.has(s.id)); db.visits = db.visits.filter(v => !ids.has(v.shopId));
+    save(); refresh(); toast('サンプルを消した'); clearSamples.armed = false; return;
+  }
+  clearSamples.armed = true; toast('もう一度押すと消える'); setTimeout(() => clearSamples.armed = false, 3000);
+}
+function exportData(){
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(db)], {type:'application/json'}));
+  a.download = `gohanmap_${todayStr().replace(/-/g,'')}.json`;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast('書き出した');
+}
+function importData(input){
+  const f = input.files[0]; if(!f) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try{
+      const d = JSON.parse(r.result);
+      if(!Array.isArray(d.shops) || !Array.isArray(d.visits)) throw new Error('形式');
+      db = d; save(); refresh(); toast(`読み込んだ（${d.shops.length}軒）`);
+    }catch(e){ toast('このファイルは読み込めない。書き出したJSONを選んでね'); }
+    input.value = '';
+  };
+  r.readAsText(f);
+}
+
+// =========================================================
+//  店の詳細
+// =========================================================
+let detailId = null, miniMap = null;
+function openDetail(id){
+  const s = shopOf(id); if(!s) return;
+  detailId = id; closePeek();
+  const vs = visitsOf(id);
+  const spent = vs.reduce((a,v) => a + (+v.price||0), 0);
+  $('#detailTitle').textContent = '';
+  $('#detailBody').innerHTML = `
+    <div class="hero">${s.status==='wish' ? wishDish(s) : dishS(s)}
+      <div class="hero-body"><p class="kick">${esc(G[s.genre]?.name)}・${esc(s.address||'')}</p>
+      <h1>${esc(s.name)}${s.again?HEART:''}</h1>${s.status==='visited' ? stars(avgRating(id)) : ''}
+      <div class="facts"><div><small>行った回数</small><b>${vs.length}回</b></div><div><small>最後</small><b>${vs[0]?md(vs[0].date):'まだ'}</b></div><div><small>合計</small><b>${spent?spent.toLocaleString()+'円':'-'}</b></div></div>
+      ${(s.tags||[]).length ? `<div class="tags">${s.tags.map(t => `<span class="tag">${esc(t)}</span>`).join('')}</div>` : ''}</div>
+    </div>
+    <div class="mini-map" id="miniMap"></div>
+    <div class="row-btns" style="margin-bottom:24px">
+      <a class="btn" href="${s.gmapUrl ? esc(s.gmapUrl) : `https://www.google.com/maps/search/?api=1&query=${s.lat},${s.lng}`}" target="_blank" rel="noopener">Googleマップ</a>
+      <button class="btn dark" onclick="openVisitForm('${s.id}')">${s.status==='wish'?'行った！':'記録を足す'}</button>
+    </div>
+    <div class="sec-h" style="margin-top:0"><h2>${s.status==='wish' ? 'まだ行ってない' : '行った記録'}</h2><small>${vs.length}件</small></div>
+    ${vs.map(v => `<article class="visit">
+      <div class="visit-top"><b>${v.date.replace(/-/g,'.')}</b>${stars(v.rating)}</div>
+      <p class="meta">${[v.with, yen(v.price)].filter(Boolean).map(esc).join('・')}</p>
+      ${v.menu ? `<p class="menu">${esc(v.menu)}</p>` : ''}${v.memo ? `<p>${esc(v.memo)}</p>` : ''}
+      ${(v.photos||[]).length ? `<div class="photos">${v.photos.map(p => `<img src="${p}" alt="">`).join('')}</div>` : ''}
+    </article>`).join('')}
+    <button class="danger" onclick="deleteShop('${s.id}')">このお店を消す</button>`;
+  openSheet('detail');
+  setTimeout(() => {
+    if(miniMap){ miniMap.remove(); miniMap = null; }
+    if(!window.L) return;
+    miniMap = L.map('miniMap', {zoomControl:false, dragging:false, scrollWheelZoom:false, doubleClickZoom:false, touchZoom:false, attributionControl:true}).setView([s.lat,s.lng], 17);
+    miniMap.attributionControl.setPrefix(false);
+    makeTiles(tileKind).addTo(miniMap);
+    L.marker([s.lat,s.lng], {icon:pinIcon(s), interactive:false}).addTo(miniMap); // 写真を探すので店のidはそのまま渡す
+  }, 320);
+}
+function deleteShop(id){
+  if(deleteShop.armed !== id){ deleteShop.armed = id; toast('もう一度押すと消える'); setTimeout(()=>deleteShop.armed=null, 3000); return; }
+  db.shops = db.shops.filter(s => s.id!==id); db.visits = db.visits.filter(v => v.shopId!==id);
+  save(); closeSheet('detail'); refresh(); toast('消した');
+}
+$('#btnEditShop').addEventListener('click', () => { const s = shopOf(detailId); closeSheet('detail'); openForm(null, s); });
+
+// =========================================================
+//  登録フォーム（新しい店＋1回目／店の編集／記録だけ追加）
+// =========================================================
+let F = null;
+const newVisit = () => ({date:todayStr(), with:'', menu:'', price:'', rating:0, memo:'', photos:[]});
+function openForm(place=null, shop=null){
+  F = shop
+    ? {mode:'edit', shop:{...shop, tags:[...(shop.tags||[])]}, visit:null}
+    : {mode:'new', shop:{id:uid(), name:'', genre:'', lat:place?.lat ?? null, lng:place?.lng ?? null, status:'visited', tags:[], again:false, address:'', gmapUrl:''}, visit:newVisit()};
+  renderForm(); openSheet('form');
+}
+function openVisitForm(shopId){
+  F = {mode:'visit', shop:{...shopOf(shopId)}, visit:newVisit()};
+  closePeek(); closeSheet('detail'); renderForm(); openSheet('form');
+}
+function renderForm(){
+  const s = F.shop, v = F.visit;
+  $('#formTitle').textContent = F.mode==='edit' ? 'お店を編集' : F.mode==='visit' ? s.name : '記録する';
+  const showVisit = v && (F.mode==='visit' || s.status==='visited');
+  let html = '';
+  // 写真（いちばん上に大きく）
+  if(showVisit){
+    html += `<div class="photo-pick"><label class="${v.photos.length?'has':''}">${v.photos.length ? `<img src="${v.photos[0]}" alt="">` : '料理の写真を<br>追加'}<input type="file" accept="image/*" multiple hidden id="vFile"></label>
+      ${v.photos.length>1 ? `<div class="more">${v.photos.slice(1).map(p => `<img src="${p}" alt="">`).join('')}</div>` : ''}</div>`;
+  }
+  if(F.mode !== 'visit'){
+    if(s.lat == null){
+      html += `<p class="field lbl" style="margin-bottom:8px">お店の場所</p><div class="how">
+        <button onclick="placeHere()"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></span><span><b>今いる場所</b><small>お店の中で記録するとき</small></span></button>
+        <button onclick="placePick()"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 21s-7-6.2-7-12a7 7 0 0 1 14 0c0 5.8-7 12-7 12Z"/><circle cx="12" cy="9" r="2.5"/></svg></span><span><b>地図で選ぶ</b><small>あとから記録するとき。地図の長押しでもOK</small></span></button>
+        <button onclick="placeLink()"><span class="ic"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg></span><span><b>Googleマップのリンク</b><small>共有したURLを貼り付ける</small></span></button>
+      </div>
+      <div id="linkBox" class="field hidden"><input type="url" id="gUrl" placeholder="https://www.google.com/maps/place/..." aria-label="GoogleマップのURL">
+        <p class="note">短いリンク（maps.app.goo.gl）は一度ブラウザで開いてから、長いURLをコピーしてね</p>
+        <button class="btn dark" style="margin-top:10px;width:100%" onclick="readLink()">位置を読み取る</button></div><div class="divider"></div>`;
+    }else{
+      html += `<div class="place-ok"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg>
+        <span>${s.address ? esc(s.address) : '場所は決まった'}</span><button class="text-btn" style="height:32px" onclick="resetPlace()">変える</button></div>`;
+    }
+    html += `
+      <div class="field"><label for="fName">お店の名前</label><input type="text" id="fName" value="${esc(s.name)}" placeholder="例）麺処 はりま"></div>
+      <div class="field"><span class="lbl">ジャンル</span><div class="choice" id="fGenre">${GENRES.map(g => `<button type="button" data-g="${g.id}" aria-pressed="${s.genre===g.id}"><span class="k">${g.k}</span>${esc(g.name)}</button>`).join('')}</div></div>
+      <div class="field"><span class="lbl">状態</span><div class="choice" id="fStatus"><button type="button" data-st="visited" aria-pressed="${s.status==='visited'}">行った</button><button type="button" data-st="wish" aria-pressed="${s.status==='wish'}">行きたい</button></div></div>
+      <div class="field"><label for="fAddr">住所・エリア（任意）</label><input type="text" id="fAddr" value="${esc(s.address)}" placeholder="例）高知市帯屋町"></div>
+      <div class="field"><label for="fTags">タグ（任意・スペース区切り）</label><input type="text" id="fTags" value="${esc((s.tags||[]).join(' '))}" placeholder="例）昼 カウンター 予約推奨"></div>
+      <div class="field"><label class="toggle"><input type="checkbox" id="fAgain" ${s.again?'checked':''}>また行きたい</label></div>`;
+  }
+  if(showVisit){
+    html += `${F.mode!=='visit' ? '<div class="divider"></div>' : ''}
+      <div class="field"><label for="vDate">行った日</label><input type="date" id="vDate" value="${v.date}"></div>
+      <div class="field"><span class="lbl">誰と</span><div class="choice" id="vWith">${COMPANIONS.map(c => `<button type="button" data-w="${c}" aria-pressed="${v.with===c}">${c}</button>`).join('')}</div></div>
+      <div class="field"><label for="vMenu">食べたもの</label><input type="text" id="vMenu" value="${esc(v.menu)}" placeholder="例）塩らーめん、半チャーハン"></div>
+      <div class="field"><label for="vPrice">金額（円・任意）</label><input type="number" inputmode="numeric" id="vPrice" value="${esc(v.price)}" placeholder="1050"></div>
+      <div class="field"><span class="lbl">評価</span><div class="star-input" id="vStars">${[1,2,3,4,5].map(n => `<button type="button" data-r="${n}" class="${v.rating>=n?'on':''}" aria-label="${n}">★</button>`).join('')}</div></div>
+      <div class="field"><label for="vMemo">メモ（任意）</label><textarea id="vMemo" placeholder="例）昼は12時前に入れば待たない">${esc(v.memo)}</textarea></div>`;
+  }
+  $('#formBody').innerHTML = html;
+  bindForm();
+}
+// 入力中の値を F に戻す（描き直す前に呼ぶ）
+function pullForm(){
+  const val = id => document.getElementById(id)?.value;
+  if(F.mode!=='visit'){
+    if(val('fName')!=null) F.shop.name = val('fName');
+    if(val('fAddr')!=null) F.shop.address = val('fAddr');
+    if(val('fTags')!=null) F.shop.tags = val('fTags').split(/[\s　]+/).filter(Boolean);
+    const ag = document.getElementById('fAgain'); if(ag) F.shop.again = ag.checked;
+  }
+  if(F.visit && document.getElementById('vDate')){
+    F.visit.date = val('vDate'); F.visit.menu = val('vMenu'); F.visit.price = val('vPrice'); F.visit.memo = val('vMemo');
+  }
+}
+function bindForm(){
+  document.querySelectorAll('#fGenre [data-g]').forEach(b => b.onclick = () => { pullForm(); F.shop.genre = b.dataset.g; renderForm(); });
+  document.querySelectorAll('#fStatus [data-st]').forEach(b => b.onclick = () => { pullForm(); F.shop.status = b.dataset.st; renderForm(); });
+  document.querySelectorAll('#vWith [data-w]').forEach(b => b.onclick = () => { pullForm(); F.visit.with = F.visit.with===b.dataset.w ? '' : b.dataset.w; renderForm(); });
+  document.querySelectorAll('#vStars [data-r]').forEach(b => b.onclick = () => { pullForm(); F.visit.rating = +b.dataset.r; renderForm(); });
+  const fi = document.getElementById('vFile');
+  if(fi) fi.onchange = async () => { pullForm(); for(const f of fi.files){ F.visit.photos.push(await shrink(f)); } renderForm(); };
+}
+// 写真は長い辺 800px に縮め、真ん中を正方形に切って保存する
+function shrink(file){
+  return new Promise(res => {
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      const side = Math.min(img.width, img.height), out = Math.min(800, side);
+      const c = document.createElement('canvas'); c.width = c.height = out;
+      c.getContext('2d').drawImage(img, (img.width-side)/2, (img.height-side)/2, side, side, 0, 0, out, out);
+      URL.revokeObjectURL(url); res(c.toDataURL('image/jpeg', .72));
+    };
+    img.src = url;
+  });
+}
+async function placeHere(){
+  pullForm();
+  try{ const p = await getHere(); F.shop.lat = p.lat; F.shop.lng = p.lng; renderForm(); }
+  catch(e){ toast('現在地が取れなかった。「地図で選ぶ」を使ってね'); }
+}
+async function placePick(){
+  pullForm(); closeSheet('form');
+  const p = await pickOnMap();
+  if(p){ F.shop.lat = p.lat; F.shop.lng = p.lng; }
+  renderForm(); openSheet('form');
+}
+function placeLink(){ $('#linkBox').classList.toggle('hidden'); $('#gUrl')?.focus(); }
+function readLink(){
+  pullForm();
+  const url = $('#gUrl').value.trim(), p = parseGmap(url);
+  if(!p){ toast('URLから位置が読み取れなかった'); return; }
+  F.shop.lat = p.lat; F.shop.lng = p.lng; F.shop.gmapUrl = url;
+  if(!F.shop.name && p.name) F.shop.name = p.name;
+  renderForm();
+}
+// GoogleマップのURLから緯度・経度（と店名）を取り出す
+function parseGmap(url){
+  const m = url.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/) || url.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) || url.match(/[?&](?:q|query|ll)=(-?\d+\.\d+),\s*(-?\d+\.\d+)/);
+  if(!m) return null;
+  const nm = url.match(/\/place\/([^/@]+)/);
+  return {lat:+m[1], lng:+m[2], name: nm ? decodeURIComponent(nm[1].replace(/\+/g,' ')) : ''};
+}
+function resetPlace(){ pullForm(); F.shop.lat = null; F.shop.lng = null; renderForm(); }
+$('#btnSave').addEventListener('click', () => {
+  pullForm();
+  const s = F.shop, v = F.visit;
+  if(F.mode!=='visit'){
+    if(s.lat == null){ toast('お店の場所を決めてね'); return; }
+    if(!s.name.trim()){ toast('お店の名前を入れてね'); $('#fName')?.focus(); return; }
+    if(!s.genre){ toast('ジャンルを選んでね'); return; }
+  }
+  const addVisit = v && (F.mode==='visit' || s.status==='visited');
+  if(addVisit && !v.rating){ toast('評価を選んでね'); return; }
+  if(F.mode==='new') db.shops.push(s);
+  else if(F.mode==='edit'){ const i = db.shops.findIndex(x=>x.id===s.id); db.shops[i] = s; }
+  else { shopOf(s.id).status = 'visited'; } // 行きたい → 行った に変える
+  if(addVisit) db.visits.push({id:uid(), shopId:s.id, ...v, price:v.price?+v.price:''});
+  if(!save()) return;
+  closeSheet('form');
+  if(addVisit){ const d = new Date(v.date); if(!isNaN(d)){ calY = d.getFullYear(); calM = d.getMonth(); } }
+  refresh(); toast(F.mode==='edit' ? 'お店を更新した' : '記録した');
+  if(addVisit) switchTab('home');
+});
+
+// =========================================================
+//  画面の切り替え
+// =========================================================
+function openSheet(id){ document.getElementById(id).classList.add('open'); $('#dock').classList.add('hide'); }
+function closeSheet(id){ document.getElementById(id).classList.remove('open'); if(!document.querySelector('.sheet.open') && !picking) $('#dock').classList.remove('hide'); }
+document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => closeSheet(b.dataset.close)));
+let current = 'home';
+function switchTab(name){
+  current = name;
+  ['home','map','list','stats'].forEach(n => document.getElementById('view-'+n).classList.toggle('hidden', n!==name));
+  document.querySelectorAll('[data-tab]').forEach(t => { if(t.dataset.tab===name) t.setAttribute('aria-current','page'); else t.removeAttribute('aria-current'); });
+  if(name==='map'){ if(!map && window.L) initMap(); setTimeout(() => map && map.invalidateSize(), 0); }
+  if(name==='home') renderHome();
+  if(name==='list') renderList();
+  if(name==='stats') renderStats();
+}
+document.querySelectorAll('[data-tab]').forEach(t => t.addEventListener('click', () => { closePeek(); switchTab(t.dataset.tab); }));
+$('#btnAdd').addEventListener('click', () => { closePeek(); openForm(); });
+function refresh(){ drawPins(); if(current==='home') renderHome(); if(current==='list') renderList(); if(current==='stats') renderStats(); }
+
+// ---------- 起動 ----------
+if('serviceWorker' in navigator && (location.protocol==='https:' || location.hostname==='localhost')){
+  navigator.serviceWorker.register('./sw.js').catch(() => {});
+}
+load(); initList(); renderHome();
+</script>
+</body>
+</html>
